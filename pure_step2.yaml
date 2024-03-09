@@ -1,0 +1,211 @@
+################# Input parameters ###############
+Parameters:
+  Prefix:
+    Default: pure
+    Type: String
+  VpcId:
+    Description : Input 'pure' VPC ID
+    Type: AWS::EC2::VPC::Id
+# Internet ALB 
+  InternetALBSecurityGroupId:
+    Description: Input 'ingress' SecurityGroup ID
+    Type: AWS::EC2::SecurityGroup::Id
+  InternetALBSubnetId1:
+    Description : Input 'public container' Subnet ID for ap-northeast-2a
+    Type : AWS::EC2::Subnet::Id
+  InternetALBSubnetId2:
+    Description : Input 'public container' Subnet ID for ap-northeast-2c
+    Type : AWS::EC2::Subnet::Id
+# Internal ALB 
+  InternalALBSecurityGroupId:
+    Description: Input 'internal' SecurityGroup ID
+    Type: AWS::EC2::SecurityGroup::Id
+  InternalALBSubnetId1:
+    Description : Input 'private container' Subnet ID for ap-northeast-2a
+    Type : AWS::EC2::Subnet::Id
+  InternalALBSubnetId2:
+    Description : Input 'private container' Subnet ID for ap-northeast-2c
+    Type : AWS::EC2::Subnet::Id
+
+Resources:
+  ############### ECS ###############
+  ## Frontend ECS 설정
+  # Frontend 클러스터
+  PureECSClusterFrontend:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${Prefix}-frontend-cluster"
+      CapacityProviders: # 용량공급자 지정
+        - FARGATE
+      ClusterSettings: # 컨테이너 인사이트 기능 사용 여부 지정
+        - Name: containerInsights
+          Value: enabled
+
+  # Frontend 태스크 정의
+  PureTaskDefinitionFrontend:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${Prefix}-frontend-def" # 태스크 정의 패일리 지정
+      ContainerDefinitions: # 컨테이너 정의
+        - Name: app-frontend # 컨테이너 이름 지정
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/pure-frontend:v1"
+          Essential: true # 어떤 이유로든 실패하거나 중지되면 작업의 일부인 다른 모든 컨테이너가 중지
+          Cpu: 256
+          MemoryReservation: 512
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 80
+              Protocol: tcp
+          Environment:
+            - Name: INTERNAL_ALB_DNS_NAME
+              Value: !Sub "${PureAlbBackend.DNSName}"
+          LogConfiguration:
+              LogDriver: awslogs
+              Options: 
+                awslogs-group: !Sub "/ecs/${Prefix}-frontend-def"
+                awslogs-region: !Ref AWS::Region
+                awslogs-stream-prefix: ecs            
+      Cpu: 512
+      Memory: 1024
+      ExecutionRoleArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/ecsTaskExecutionRole" # 태스크 실행 역할
+      NetworkMode: awsvpc # awsvpc 네트워크 모드는 Fargate에서 호스팅되는 작업에 필요
+      RequiresCompatibilities: # 시작 유형
+        - FARGATE
+    DependsOn:
+      - PureAlbBackend
+  PureCloudWatchLogsFrontend:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/pure-frontend-def
+      RetentionInDays: 14
+    UpdateReplacePolicy: Retain # 스택 업데이트 작업 중 리소스의 기존 물리적 인스턴스가 교체될 때 보존하거나 경우에 따라 백업할 수 있다.
+
+  ############### Application Load Balancer ###############    
+  
+  ## Internet ALB
+  PureAlbFrontend:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "${Prefix}-alb-ingress-frontend"
+      Type: application
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref InternetALBSecurityGroupId
+      Subnets:
+        - !Ref InternetALBSubnetId1
+        - !Ref InternetALBSubnetId2
+      LoadBalancerAttributes:
+        - Key: deletion_protection.enabled # 삭제 방지 활성화 여부
+          Value: false # 기본값이 false
+  PureTargetGroupFrontendBlue:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${Prefix}-tg-frontend-blue"
+      Port: 80
+      Protocol: HTTP
+      TargetType: ip # 대상 유형
+      HealthCheckIntervalSeconds: 15
+      HealthCheckPath: /
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+      Matcher: # 성공 코드
+        HttpCode: 200
+      VpcId: !Ref VpcId
+  PureTargetGroupFrontendGreen:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${Prefix}-tg-frontend-green"
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip # 대상 유형
+      HealthCheckIntervalSeconds: 15
+      HealthCheckPath: /
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+      Matcher: # 성공 코드
+        HttpCode: 200
+      VpcId: !Ref VpcId
+  PureFrontendListener1:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+        DefaultActions: 
+          - TargetGroupArn: !Ref PureTargetGroupFrontendBlue
+            Type: forward
+        LoadBalancerArn: !Ref PureAlbFrontend
+        Port: 80
+        Protocol: HTTP
+  PureFrontendListener2:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+        DefaultActions: 
+          - TargetGroupArn: !Ref PureTargetGroupFrontendGreen
+            Type: forward
+        LoadBalancerArn: !Ref PureAlbFrontend
+        Port: 8080
+        Protocol: HTTP
+
+  ## Internal ALB
+  PureAlbBackend:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "${Prefix}-alb-ingress-backend"
+      Type: application
+      Scheme: internal
+      SecurityGroups:
+        - !Ref InternalALBSecurityGroupId
+      Subnets:
+        - !Ref InternalALBSubnetId1
+        - !Ref InternalALBSubnetId2
+      LoadBalancerAttributes:
+        - Key: deletion_protection.enabled # 삭제 방지 활성화 여부
+          Value: false # 기본값이 false
+  PureTargetGroupBackendBlue:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${Prefix}-tg-backend-blue"
+      Port: 3000
+      Protocol: HTTP
+      TargetType: ip # 대상 유형
+      HealthCheckIntervalSeconds: 15
+      HealthCheckPath: /health
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+      Matcher: # 성공 코드
+        HttpCode: 200
+      VpcId: !Ref VpcId
+  PureTargetGroupBackendGreen:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "${Prefix}-tg-backend-green"
+      Port: 10080
+      Protocol: HTTP
+      TargetType: ip # 대상 유형
+      HealthCheckIntervalSeconds: 15
+      HealthCheckPath: /health
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+      Matcher: # 성공 코드
+        HttpCode: 200
+      VpcId: !Ref VpcId
+  PureBackendListener1:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+        DefaultActions: 
+          - TargetGroupArn: !Ref PureTargetGroupBackendBlue
+            Type: forward
+        LoadBalancerArn: !Ref PureAlbBackend
+        Port: 3000
+        Protocol: HTTP
+  PureBackendListener2:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+        DefaultActions: 
+          - TargetGroupArn: !Ref PureTargetGroupBackendGreen
+            Type: forward
+        LoadBalancerArn: !Ref PureAlbBackend
+        Port: 10080
+        Protocol: HTTP

@@ -1,0 +1,596 @@
+Resources:
+  # Pure VPC
+  PureVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      # 테넌시(Tenancy)란 가상화된 리소스를 호스팅하는 물리적인 하드웨어 리소스의 공유 방식
+      # 인스턴스 시작 중에 다른 테넌시를 명시적으로 지정하지 않는 한, VPC로 시작된 인스턴스는 기본적으로 공유 하드웨어에서 실행
+      # 이는 여러 사용자 및 계정이 동일한 물리적인 하드웨어 리소스를 공유하는 것을 의미
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: pure-VPC
+
+  ############### Subnet, RouteTable, IGW ###############
+  # 프라이빗 컨테이너 관련 설정 
+  ## 컨테이너 애플리케이션용 프라이빗 서브넷
+  PureSubnetPrivateContainerA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.1.0/24
+      VpcId:
+        Ref: PureVpc
+      AvailabilityZone: 
+        Fn::Select: # 인덱스별 객체 목록에서 객체 하나를 반환한다.
+          - 0 # 가져올 객체의 인덱스로 이 항목은 0부터 N-1까지의 값이어야 한다.
+          - Fn::GetAZs: "" # 선택할 객체의 목록으로 null이 아니어야 한다. 리전에 대한 가용 영역 목록을 가져오는 함수가 중첩되어 사용되었다. 
+      MapPublicIpOnLaunch: false # 해당 서브넷에서 시작된 인스턴스가 공인 IPv4 주소를 받는지 여부를 나타내는 옵션
+      Tags:
+        - Key: Name
+          Value: pure-subnet-private-container-a
+        - Key: Type
+          Value: Isolated
+  PureSubnetPrivateContainerC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.2.0/24
+      VpcId:
+        Ref: PureVpc
+      AvailabilityZone: 
+        Fn::Select: 
+          - 2
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: pure-subnet-private-container-c
+        - Key: Type
+          Value: Isolated
+  ## 프라이빗 컨테이너 애플리케이션용 라우팅 테이블
+  PureRouteBackendApp:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: PureVpc
+      Tags:
+        - Key: Name
+          Value: pure-route-backend-app
+  ## 프라이빗 컨테이너 서브넷과 라우팅 연결
+  PureRouteBackendAppAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PureRouteBackendApp
+      SubnetId:
+        Ref: PureSubnetPrivateContainerA
+  PureRouteBackendAppAssociationC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PureRouteBackendApp
+      SubnetId:
+        Ref: PureSubnetPrivateContainerC
+
+  # DB관련 설정
+  ## DB용 프라이빗 서브넷
+  PureSubnetPrivateDbA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.3.0/24
+      VpcId:
+        Ref: PureVpc
+      AvailabilityZone: 
+        Fn::Select: 
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: pure-subnet-private-db-a
+        - Key: Type
+          Value: Isolated
+  PureSubnetPrivateDbC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.4.0/24
+      VpcId:
+        Ref: PureVpc
+      AvailabilityZone: 
+        Fn::Select: 
+          - 2
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: pure-subnet-private-db-c
+        - Key: Type
+          Value: Isolated
+  ## DB용 라우팅 테이블
+  PureRouteDb:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: PureVpc
+      Tags:
+        - Key: Name
+          Value: pure-route-db
+  ## DB 서브넷에 라우팅 연결
+  PureRouteDbAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PureRouteDb
+      SubnetId:
+        Ref: PureSubnetPrivateDbA
+  PureRouteDbAssociationC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PureRouteDb
+      SubnetId:
+        Ref: PureSubnetPrivateDbC
+
+  # 퍼블릭 컨테이너 관련 설정 
+  ## 퍼블릭 애플리케이션용 퍼블릭 서브넷
+  PureSubnetPublicContainerA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.5.0/24
+      VpcId:
+        Ref: PureVpc
+      AvailabilityZone: 
+        Fn::Select: 
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: pure-subnet-public-container-a
+        - Key: Type
+          Value: Public
+  PureSubnetPublicContainerC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.6.0/24
+      VpcId:
+        Ref: PureVpc
+      AvailabilityZone: 
+        Fn::Select: 
+          - 2
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: pure-subnet-public-container-c
+        - Key: Type
+          Value: Public
+  ## 퍼블릭 컨테이너 애플리케이션용 라우팅 테이블
+  PureRouteFrontendApp:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: PureVpc
+      Tags:
+        - Key: Name
+          Value: pure-route-frontend-app
+  ## 퍼블릭 컨테이너 서브넷과 라우팅 연결
+  PureRouteFrontendAppAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PureRouteFrontendApp
+      SubnetId:
+        Ref: PureSubnetPublicContainerA
+  PureRouteFrontendAppAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PureRouteFrontendApp
+      SubnetId:
+        Ref: PureSubnetPublicContainerC
+  ## Frontend용 라우팅 테이블의 기본 라우팅
+  PureRouteFrontendAppDefault:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: PureRouteFrontendApp
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: PureIgw
+    DependsOn:
+      - PureVpcgwAttachment
+
+  # 관리 서버 관련 설정
+  ## 관리용 퍼블릭 서브넷
+  PureSubnetPublicManagementA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.240.0/24
+      VpcId:
+        Ref: PureVpc
+      AvailabilityZone: 
+        Fn::Select: 
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: pure-subnet-public-management-a
+        - Key: Type
+          Value: Public
+  PureSubnetPublicManagementC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.241.0/24
+      VpcId:
+        Ref: PureVpc
+      AvailabilityZone: 
+        Fn::Select: 
+          - 2
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: pure-subnet-public-management-c
+        - Key: Type
+          Value: Public
+  ## 관리용 서브넷의 라우팅은 Ingress와 동일하게 생성
+  PureRouteManagementAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PureRouteFrontendApp
+      SubnetId:
+        Ref: PureSubnetPublicManagementA
+  PureRouteManagementAssociation1C:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: PureRouteFrontendApp
+      SubnetId:
+        Ref: PureSubnetPublicManagementC
+
+  # 인터넷 접속을 위한 게이트웨이 생성
+  PureIgw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: pure-igw
+  PureVpcgwAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: PureVpc
+      InternetGatewayId:
+        Ref: PureIgw
+
+  # VPC 엔드포인트 관련 설정
+  ## VPC 엔드포인트(Egress통신)용 프라이빗 서브넷
+  PureSubnetPrivateEgressA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.7.0/24
+      VpcId:
+        Ref: PureVpc
+      AvailabilityZone: 
+        Fn::Select: 
+          - 0
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: pure-subnet-private-egress-a
+        - Key: Type
+          Value: Isolated
+  PureSubnetPrivateEgressC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.8.0/24
+      VpcId:
+        Ref: PureVpc
+      AvailabilityZone: 
+        Fn::Select: 
+          - 2
+          - Fn::GetAZs: ""
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: pure-subnet-private-egress-c
+        - Key: Type
+          Value: Isolated
+
+############### Security groups ###############
+  # 보안 그룹 생성
+  ## 인터넷 공개용 보안 그룹 생성
+  PureSgIngress:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ingress
+      GroupName: ingress
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic by default
+          IpProtocol: "-1"
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          Description: from 0.0.0.0/0:80
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+      Tags:
+        - Key: Name
+          Value: pure-sg-ingress
+      VpcId:
+        Ref: PureVpc
+  ## 관리 서버용 보안 그룹 생성
+  PureSgManagement:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group of management server
+      GroupName: management
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic by default
+          IpProtocol: "-1"
+      Tags:
+        - Key: Name
+          Value: pure-sg-management
+      VpcId:
+        Ref: PureVpc
+  ## 백엔드 컨테이너 애플리케이션용 보안 그룹 생성
+  PureSgBackendContainer:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group of backend app
+      GroupName: backend-container
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic by default
+          IpProtocol: "-1"
+      Tags:
+        - Key: Name
+          Value: pure-sg-backend-container
+      VpcId:
+        Ref: PureVpc
+  ## 프론트엔드 컨테이너 애플리케이션용 보안 그룹 생성
+  PureSgFrontendContainer:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group of frontend container app
+      GroupName: frontend-container
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic by default
+          IpProtocol: "-1"
+      Tags:
+        - Key: Name
+          Value: pure-sg-frontend-container
+      VpcId:
+        Ref: PureVpc
+  ## 내부용 로드밸런서의 보안 그룹 생성
+  PureSgInternal:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for internal load balancer
+      GroupName: internal
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic by default
+          IpProtocol: "-1"
+      Tags:
+        - Key: Name
+          Value: pure-sg-internal
+      VpcId:
+        Ref: PureVpc
+  ## DB용 보안 그룹 생성
+  PureSgDb:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group of database
+      GroupName: database
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic by default
+          IpProtocol: "-1"
+      Tags:
+        - Key: Name
+          Value: pure-sg-db
+      VpcId:
+        Ref: PureVpc
+  ## VPC 엔드포인트용 보안 그룹 설정
+  PureSgEgress:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group of VPC Endpoint
+      GroupName: egress
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic by default
+          IpProtocol: "-1"
+      Tags:
+        - Key: Name
+          Value: pure-sg-vpce
+      VpcId:
+        Ref: PureVpc
+
+  # 역할 연결
+  ## Internet LB -> Front Container
+  PureSgFrontContainerFromSgIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      Description: HTTP for Ingress
+      FromPort: 80
+      GroupId:
+        Fn::GetAtt: # 템플릿의 리소스에서 속성 값을 반환
+          - PureSgFrontendContainer # 원하는 속성을 포함하는 리소스의 논리적 이름
+          - GroupId # 값을 가져올 리소스 관련 속성의 이름
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+          - PureSgIngress
+          - GroupId
+      ToPort: 80
+  ## Management server -> Internet LB
+  PureSgIngressFromSgManagementTCP:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      Description: Frontend Test Port for Management
+      FromPort: 8080
+      GroupId:
+        Fn::GetAtt: # 템플릿의 리소스에서 속성 값을 반환
+          - PureSgIngress # 원하는 속성을 포함하는 리소스의 논리적 이름
+          - GroupId # 값을 가져올 리소스 관련 속성의 이름
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+          - PureSgManagement
+          - GroupId
+      ToPort: 8080
+  ## Front Container -> Internal LB
+  PureSgInternalFromSgFrontContainer:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      Description: Connect Frontend and Backend
+      FromPort: 3000
+      GroupId:
+        Fn::GetAtt:
+          - PureSgInternal
+          - GroupId
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+          - PureSgFrontendContainer
+          - GroupId
+      ToPort: 3000
+  ## Management server -> Internal LB
+  PureSgInternalFromSgManagementTCP1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      Description: Backend Test Port for Management
+      FromPort: 10080
+      GroupId:
+        Fn::GetAtt:
+          - PureSgInternal
+          - GroupId
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+          - PureSgManagement
+          - GroupId
+      ToPort: 10080
+  ## Internal LB -> Back Container
+  PureSgContainerFromSgInternal:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      Description: HTTP for internal lb
+      FromPort: 3000
+      GroupId:
+        Fn::GetAtt:
+          - PureSgBackendContainer
+          - GroupId
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+          - PureSgInternal
+          - GroupId
+      ToPort: 3000
+  ## Back container -> DB
+  PureSgDbFromSgContainerTCP:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      Description: MySQL protocol from backend App
+      FromPort: 3306
+      GroupId:
+        Fn::GetAtt:
+          - PureSgDb
+          - GroupId
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+          - PureSgBackendContainer
+          - GroupId
+      ToPort: 3306
+  ## Management server -> DB
+  PureSgDbFromSgManagementTCP:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      Description: MySQL protocol from management server
+      FromPort: 3306
+      GroupId:
+        Fn::GetAtt:
+          - PureSgDb
+          - GroupId
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+          - PureSgManagement
+          - GroupId
+      ToPort: 3306
+  ## Management server -> Internal LB
+  PureSgInternalFromSgManagementTCP2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      Description: HTTP for management server
+      FromPort: 80
+      GroupId:
+        Fn::GetAtt:
+          - PureSgInternal
+          - GroupId
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+          - PureSgManagement
+          - GroupId
+      ToPort: 80
+  ### Back container -> VPC endpoint
+  PureSgVpceFromSgContainerTCP:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      Description: HTTPS for Backend Container App
+      FromPort: 443
+      GroupId:
+        Fn::GetAtt:
+          - PureSgEgress
+          - GroupId
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+          - PureSgBackendContainer
+          - GroupId
+      ToPort: 443
+  ### Front container -> VPC endpoint
+  PureSgVpceFromSgFrontContainerTCP:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      Description: HTTPS for Front Frontend Container App
+      FromPort: 443
+      GroupId:
+        Fn::GetAtt:
+          - PureSgEgress
+          - GroupId
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+          - PureSgFrontendContainer
+          - GroupId
+      ToPort: 443
+  ### Management Server -> VPC endpoint
+  PureSgVpceFromSgManagementTCP:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      Description: HTTPS for management server
+      FromPort: 443
+      GroupId:
+        Fn::GetAtt:
+          - PureSgEgress
+          - GroupId
+      SourceSecurityGroupId:
+        Fn::GetAtt:
+          - PureSgManagement
+          - GroupId
+      ToPort: 443
