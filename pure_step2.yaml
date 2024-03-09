@@ -169,7 +169,7 @@ Resources:
       Protocol: HTTP
       TargetType: ip # 대상 유형
       HealthCheckIntervalSeconds: 15
-      HealthCheckPath: /health
+      HealthCheckPath: /healthcheck
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 3
       UnhealthyThresholdCount: 2
@@ -184,7 +184,7 @@ Resources:
       Protocol: HTTP
       TargetType: ip # 대상 유형
       HealthCheckIntervalSeconds: 15
-      HealthCheckPath: /health
+      HealthCheckPath: /healthcheck
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 3
       UnhealthyThresholdCount: 2
